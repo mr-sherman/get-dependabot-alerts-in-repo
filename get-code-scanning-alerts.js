@@ -1,35 +1,75 @@
 #!/usr/bin/env node
 
 require('dotenv').config()
-const pReduce = require('./lib/p-reduce');
 const delay = require('delay');
 const {Octokit} = require('@octokit/rest')
+const { graphql } = require("@octokit/graphql");
 const octokit = new Octokit({
   auth: process.env.GH_AUTH_TOKEN,
   previews: ['dorian-preview']
 })
 
 var buffer = ""
-
 const [, , ...args] = process.argv
 const repo_path = args[0]
 
-console.log("repo,tool,rule_id,severity,open,created_at,closed_by,closed_at,url,closed_reason")
-octokit
-        .paginate("GET /repos/:repo/code-scanning/alerts?per_page=100", {
-          repo: repo_path
-        })
-        .then(alerts => {
-          if (alerts.length > 0) {
+const org = repo_path.split('/')[0]
+const repo = repo_path.split('/')[1]
 
-            pReduce(alerts, (alert) => {
-              console.log(`${repo_path},${alert.tool.name},${alert.rule.id},${alert.rule.severity},${alert.state},${alert.created_at},${alert.dismissed_by},${alert.dismissed_at},${alert.html_url},${alert.dismissed_reason}`)
-            }) 
-          } 
-          delay(300);
-        })
-        .catch(error => {
-          console.error(`Getting repositories for repo ${repo_path} failed.
-          ${error.message} (${error.status})
-          ${error.documentation_url}`)
-        })        
+
+console.log("org, repo, created at, dismissed at, package name, vulnerable version, severity, vulnerability id")      
+const graphqlWithAuth = graphql.defaults({
+  //baseUrl: args[0] + "/api",
+  headers: {
+    authorization: 'token ' + process.env.GH_AUTH_TOKEN,
+  },
+});
+
+const query = `
+{
+    repository(name: "${repo}", owner: "${org}") {
+        vulnerabilityAlerts(first: 100) {
+            nodes {
+                createdAt
+                dismissedAt
+                securityVulnerability {
+                    package {
+                        name
+                    }
+                  	severity
+      							vulnerableVersionRange
+                    advisory {
+                        ghsaId
+                      	publishedAt
+                      	identifiers{
+                          type
+                          value
+                        }
+                    }
+                }
+            }
+        }
+    }
+}`;
+
+try {
+  graphqlWithAuth(query, 
+    
+    ).then(alerts =>{
+                      alerts.repository.vulnerabilityAlerts.nodes.forEach( (node)=> 
+                      {console.log(`${org},${repo}, ${node.createdAt,node.createdAt}, ${node.createdAt,node.dismissedAt}, ${node.securityVulnerability.package.name}, ` + 
+                        `${node.securityVulnerability.vulnerableVersionRange}, ${node.securityVulnerability.severity},` + 
+                        `${node.securityVulnerability.advisory.ghsaId}`)})
+     
+    });
+
+} catch (error) {
+ 
+
+  console.log("Request failed:", error.request); 
+  console.log(error.message); 
+  console.log(error.data);
+}
+
+
+
